@@ -1,0 +1,143 @@
+name: cvmt
+
+services:
+  sysexporter:
+    image: harbor.arfa.wise-paas.com/cvmt/sysexporter
+    build: {context: ./lib/prometheus, target: sys}
+    profiles: [cv, op, dev]
+    networks: [hw]
+    pid: host
+    labels:
+      prometheus.exporter.enable: Y
+      prometheus.exporter.name: sys
+    volumes:
+      - /:/host:ro
+    command:
+      # https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/prometheus-config-examples/docker-compose-linux/
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --no-collector.arp
+      - --no-collector.bcache
+      - --no-collector.bonding
+      - --no-collector.buddyinfo
+      - --no-collector.btrfs
+      - --no-collector.conntrack
+      #- --no-collector.cpu
+      - --no-collector.cpufreq
+      - --no-collector.diskstats
+      - --no-collector.drbd
+      - --no-collector.dmi
+      - --no-collector.edac
+      - --no-collector.entropy
+      - --no-collector.ethtool
+      - --no-collector.filefd
+      #- --no-collector.filesystem
+      - --no-collector.fibrechannel
+      - --no-collector.hwmon
+      - --no-collector.infiniband
+      - --no-collector.interrupts
+      - --no-collector.ipvs
+      - --no-collector.ksmd
+      - --no-collector.loadavg
+      - --no-collector.logind
+      - --no-collector.mdadm
+      #- --no-collector.meminfo
+      - --no-collector.meminfo_numa
+      - --no-collector.mountstats
+      - --no-collector.netdev
+      - --no-collector.netstat
+      - --no-collector.netclass
+      - --no-collector.nfs
+      - --no-collector.nfsd
+      - --no-collector.nvme
+      - --no-collector.os
+      - --no-collector.powersupplyclass
+      - --no-collector.pressure
+      - --no-collector.rapl
+      - --no-collector.slabinfo
+      - --no-collector.sockstat
+      - --no-collector.schedstat
+      - --no-collector.selinux
+      - --no-collector.softnet
+      - --no-collector.stat
+      - --no-collector.systemd
+      - --no-collector.tapestats
+      - --no-collector.thermal_zone
+      - --no-collector.textfile
+      - --no-collector.time
+      - --no-collector.timex
+      - --no-collector.uname
+      - --no-collector.udp_queues
+      - --no-collector.vmstat
+      - --no-collector.watchdog
+      - --no-collector.wifi
+      - --no-collector.xfs
+      - --no-collector.zfs
+      - --collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($|/)
+  gpuexporter:
+    image: harbor.arfa.wise-paas.com/cvmt/gpuexporter
+    build: {context: ./lib/prometheus, target: gpu}
+    privileged: true
+    profiles: [cv, op, gpu]
+    networks: [hw]
+    runtime: nvidia
+    devices:
+      - /dev:/dev
+    volumes:
+      - /usr/lib/x86_64-linux-gnu/:/usr/lib/x86_64-linux-gnu/:ro
+      - /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro
+    labels:
+      prometheus.exporter.enable: Y
+      prometheus.exporter.name: gpu
+  prometheus:
+    image: harbor.arfa.wise-paas.com/cvmt/prometheus
+    build: ./lib/prometheus
+    profiles: [cv, op, dev]
+    networks: [cv, hw] # connect to socat for service discovery via docker
+    volumes:
+      - cv-prome:/opt/bitnami/prometheus/data
+    ports:
+      - 9090:9090 # export for development
+  socat:
+    image: harbor.arfa.wise-paas.com/cvmt/socat
+    build: {context: ./lib/cvmt, target: socat}
+    profiles: [cv, op, dev, devop]
+    networks: [cv]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock]
+    command: tcp-listen:2375,fork,reuseaddr unix-connect:/var/run/docker.sock
+  backend:
+    image: harbor.arfa.wise-paas.com/cvmt/backend
+    profiles: [cv]
+    networks: [cv]
+    ports:
+      - 7000:8000 # export for development
+    volumes:
+      - ${PWD}/app/storage:/usr/src/app/storage:rw
+    environment:
+      WORKFLOW_NAME: ${WORKFLOW_NAME:-cvmt}
+      WORKFLOW_CVMT: ${WORKFLOW_CVMT:-http://backend:8000} # to report status from worker to server
+      WORKFLOW_LOGGER: ${WORKFLOW_LOGGER:-journald} # forward worker log
+      WORKFLOW_SHMSIZE: ${WORKFLOW_SHMSIZE:-2g} # limit to worker
+      WORKFLOW_APPHOME: ${PWD}/app # dir to share datas to worker
+      WORKFLOW_MEMLIMIT: ${WORKFLOW_MEMLIMIT:-4g} # limit to worker
+      WORKFLOW_MEMLIMIT_ANNO: ${WORKFLOW_MEMLIMIT_ANNO:-4g} # limit to worker for anno task
+      WORKFLOW_MEMLIMIT_TRAIN: ${WORKFLOW_MEMLIMIT_TRAIN:-8g} # limit to worker for train task
+      WORKFLOW_MEMLIMIT_EXPORT: ${WORKFLOW_MEMLIMIT_EXPORT:-2g} # limit to worker for export task
+      WORKFLOW_CPUCOUNT: ${WORKFLOW_CPUCOUNT:-4} # limit to worker
+      WORKFLOW_CPULIMIT: ${WORKFLOW_CPULIMIT:-30%} # limit to worker
+      WORKFLOW_CPULIMIT_ANNO: ${WORKFLOW_CPULIMIT_ANNO:-25%} # limit to worker for anno task
+      WORKFLOW_CPULIMIT_TRAIN: ${WORKFLOW_CPULIMIT_TRAIN:-30%} # limit to worker for train task
+      WORKFLOW_CPULIMIT_EXPORT: ${WORKFLOW_CPULIMIT_EXPORT:-10%} # limit to worker for export task
+      WORKFLOW_PROMETHEUS: http://prometheus:9090
+      DOCKER_HOST: ${DOCKER_HOST:-tcp://socat:2375}
+      # https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-}
+
+volumes:
+  cv-prome:
+    driver: local
+
+networks:
+  hw:
+  cv:
