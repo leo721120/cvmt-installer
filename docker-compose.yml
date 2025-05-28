@@ -141,8 +141,10 @@ services:
   pg:
     image: harbor.arfa.wise-paas.com/cvmt/pg
     build: {target: pgdb}
-    profiles: [db]
     networks: [db]
+    profiles:
+      - db
+      #:disable[db]- cv
     volumes:
       - pg-db:/bitnami/postgresql
     environment:
